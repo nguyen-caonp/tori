@@ -12,11 +12,23 @@ const STORAGE_CONNECTION = "storage";
 const CLICKSEND_OPT_OUT_LIST = 2407312; // "Opt-Out List" — numbers that replied STOP
 
 const SEND_HOUR_OSLO = 18;
-// Texts are filled in once Tori supplies them. {navn} = first name.
+// {navn} = first name; "Hei {navn}!" becomes "Hei!" when the name is missing.
 const FOLLOW_UPS = [
-  { day: "tuesday", offsetDays: 1, text: "TEKST TIRSDAG {navn}" },
-  { day: "wednesday", offsetDays: 2, text: "TEKST ONSDAG {navn}" },
-  { day: "thursday", offsetDays: 3, text: "TEKST TORSDAG {navn}" },
+  {
+    day: "tuesday",
+    offsetDays: 1,
+    text: "Hei {navn}! Klar for å bli pianisten som bare kan sette seg ned og spille\nSe opptaket og søk her: https://www.toriskrede.no/page/686856",
+  },
+  {
+    day: "wednesday",
+    offsetDays: 2,
+    text: "Gå fra noteslave til fri brukspianist som spiller akkurat det du vil! Se opptaket og søk her: https://www.toriskrede.no/page/686856\nTori",
+  },
+  {
+    day: "thursday",
+    offsetDays: 3,
+    text: "Hei {navn}!\n\nForestill deg å spille uten noter - fri og avslappet! Søk i kveld: https://www.toriskrede.no/ansok\n\nTori",
+  },
 ] as const;
 // A follow-up whose send time passed more than this long ago is skipped, not sent late.
 const LATE_TOLERANCE_SECONDS = 2 * 60 * 60;
@@ -86,25 +98,37 @@ export default defineDurable<Input, unknown>(
     const email = (input.email ?? "").trim().toLowerCase();
     const firstName = (input.first_name ?? "").trim();
     const phone = cleanPhone(input.phone ?? "");
-    const scheduledAt = input.webinar?.scheduled_at ?? null;
-    const webinarStart = scheduledAt ? new Date(scheduledAt) : null;
+    const scheduledAt = input.webinar?.scheduled_at ?? "";
 
     if (!phone) {
       return { skipped: true, reason: "invalid-phone", phone: input.phone ?? null };
     }
-    if (!webinarStart || isNaN(webinarStart.getTime())) {
+
+    // The durable runtime forbids Date construction outside steps, so all date math is journaled here.
+    const plan = await ctx.step("plan-send-times", async () => {
+      const webinarStart = new Date(scheduledAt);
+      if (isNaN(webinarStart.getTime())) {
+        return null;
+      }
+      const webinarDay = osloDateParts(webinarStart);
+      return {
+        // Applications from the webinar day onwards count; earlier rounds do not.
+        applyCutoff: osloTimeToUnix(webinarDay.year, webinarDay.month, webinarDay.day, 0),
+        webinarDateLabel: `${webinarDay.year}-${webinarDay.month}-${webinarDay.day}`,
+        sendTimes: FOLLOW_UPS.map((f) =>
+          osloTimeToUnix(webinarDay.year, webinarDay.month, webinarDay.day + f.offsetDays, SEND_HOUR_OSLO),
+        ),
+      };
+    });
+    if (!plan) {
       return { skipped: true, reason: "no-webinar-date" };
     }
-
-    const webinarDay = osloDateParts(webinarStart);
-    // Applications from the webinar day onwards count; earlier rounds do not.
-    const applyCutoff = osloTimeToUnix(webinarDay.year, webinarDay.month, webinarDay.day, 0);
-    const webinarDateLabel = `${webinarDay.year}-${webinarDay.month}-${webinarDay.day}`;
+    const { applyCutoff, webinarDateLabel } = plan;
 
     const results: Record<string, string> = {};
 
-    for (const followUp of FOLLOW_UPS) {
-      const sendAt = osloTimeToUnix(webinarDay.year, webinarDay.month, webinarDay.day + followUp.offsetDays, SEND_HOUR_OSLO);
+    for (const [index, followUp] of FOLLOW_UPS.entries()) {
+      const sendAt = plan.sendTimes[index];
 
       if (!input.test_mode) {
         const now = await ctx.step(`capture-time-before-${followUp.day}`, async () => Math.floor(Date.now() / 1000));
@@ -118,18 +142,19 @@ export default defineDurable<Input, unknown>(
       }
 
       if (email) {
-        const applied = await ctx.step(`check-applied-before-${followUp.day}`, async () =>
-          sdk.runAction({
+        const appliedAt = await ctx.step(`check-applied-before-${followUp.day}`, async () => {
+          const stored = await sdk.runAction({
             appKey: STORAGE_APP_KEY,
             actionType: "search",
             actionKey: "get_value",
             connection: STORAGE_CONNECTION,
             inputs: { key: storageKey("s_", email) },
-          }),
-        );
-        const appliedAtRaw = (applied.data[0] as { value?: unknown } | undefined)?.value;
-        const appliedAt = typeof appliedAtRaw === "string" ? Date.parse(appliedAtRaw) / 1000 : NaN;
-        if (!isNaN(appliedAt) && appliedAt >= applyCutoff) {
+          });
+          const raw = (stored.data[0] as { value?: unknown } | undefined)?.value;
+          const parsed = typeof raw === "string" ? Date.parse(raw) / 1000 : NaN;
+          return isNaN(parsed) ? null : parsed;
+        });
+        if (appliedAt !== null && appliedAt >= applyCutoff) {
           results[followUp.day] = "skipped-applied";
           continue;
         }
@@ -160,7 +185,7 @@ export default defineDurable<Input, unknown>(
         }),
       );
 
-      const body = followUp.text.replaceAll("{navn}", firstName);
+      const body = followUp.text.replace(/ \{navn\}/g, firstName ? ` ${firstName}` : "");
       await ctx.step(`send-${followUp.day}-sms`, async () =>
         sdk.runAction({
           appKey: CLICKSEND_APP_KEY,
