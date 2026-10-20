@@ -5,12 +5,12 @@ Zapier is the source of truth for what runs; these copies are for review and his
 
 | File | Zapier workflow | Trigger |
 |---|---|---|
-| `log-autowebinar-applicant.ts` | [`log-autowebinar-applicant`](https://zapier.com/workflow/01a15880-faac-7b27-be04-a61d3ad85209) | Simplero: tag "Søkt autowebinar" (221554) added |
-| `autowebinar-apply-sms.ts` | [`autowebinar-apply-sms`](https://zapier.com/workflow/01a15881-43da-716b-a0bd-4656a983f040) | WebinarFuel: registered to "BLI VENN MED PIANOET DITT!" (#18107) |
+| `log-autowebinar-applicant.ts` | [`log-autowebinar-applicant`](https://zapier.com/workflow/01a158ab-3597-7ef6-904c-6e75672488f1) | Simplero: tag "Søkt autowebinar" (221554) added |
+| `autowebinar-apply-sms.ts` | [`autowebinar-apply-sms`](https://zapier.com/workflow/01a158ab-51c1-7bb7-bcf6-64b3024a6814) | WebinarFuel: registered to "BLI VENN MED PIANOET DITT!" (#18107) |
 
 These are Zapier workflows, not classic Zaps, so they do not appear in the Zaps list.
-Open them with the links above (code, trigger and run history). Both are private: only
-the Zapier user who owns the Simplero, ClickSend and WebinarFuel connections can see them.
+Open them with the links above (code, trigger and run history). Both are shared with
+everyone on the Zapier account. (Earlier private copies are switched off and can be deleted.)
 
 ## How it fits together
 
